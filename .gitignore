@@ -11,3 +11,13 @@ results/test_predictions.csv
 results/baseline_predictions.csv
 results/scheduling_simulation.csv
 results/scheduling_metrics_by_day.csv
+house1_15min*.csv
+results/rolling/
+results/.matplotlib/
+results/comparison.csv
+results/metrics.json
+results/schedules.json
+results/load_profiles.csv
+results/demand_comparison.png
+results/metrics_comparison.png
+models/*.json

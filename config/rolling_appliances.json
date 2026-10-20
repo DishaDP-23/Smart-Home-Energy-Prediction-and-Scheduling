@@ -1,0 +1,19 @@
+{
+  "description": "Additional simulated jobs on recorded REFIT aggregate; not shifts of measured channels. Tariffs are illustrative, not a utility plan.",
+  "slot_minutes": 15,
+  "max_household_kw": 5.0,
+  "preferred_total_kw": 3.5,
+  "off_peak_threshold": 4.0,
+  "currency": "demo_units",
+  "tariff_periods": [
+    {"start_hour": 0, "end_hour": 6, "rate": 4.0},
+    {"start_hour": 6, "end_hour": 17, "rate": 6.0},
+    {"start_hour": 17, "end_hour": 21, "rate": 10.0},
+    {"start_hour": 21, "end_hour": 24, "rate": 4.0}
+  ],
+  "daily_jobs": [
+    {"id": "sim_washing_machine", "power_kw": 1.0, "duration_minutes": 60, "request_time": "18:00", "earliest_time": "18:00", "finish_time": "24:00", "max_delay_minutes": 240, "priority": 3},
+    {"id": "sim_dishwasher", "power_kw": 1.2, "duration_minutes": 90, "request_time": "18:00", "earliest_time": "18:00", "finish_time": "24:00", "max_delay_minutes": 240, "priority": 2},
+    {"id": "sim_dryer", "power_kw": 1.8, "duration_minutes": 60, "request_time": "19:00", "earliest_time": "19:00", "finish_time": "24:00", "max_delay_minutes": 180, "priority": 1}
+  ]
+}

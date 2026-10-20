@@ -1,11 +1,12 @@
 
 from pathlib import Path
 import json
+import argparse
+import os
 
 import joblib
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from xgboost import XGBRegressor
 from sklearn.metrics import (
@@ -23,6 +24,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = PROJECT_ROOT / "data" / "processed" / "house1_training.csv"
 MODEL_DIR = PROJECT_ROOT / "models"
 RESULTS_DIR = PROJECT_ROOT / "results"
+
+parser = argparse.ArgumentParser(description="Train Person 1's next-interval model")
+parser.add_argument('--data', type=Path, default=DATA_FILE)
+parser.add_argument('--model-dir', type=Path, default=MODEL_DIR)
+parser.add_argument('--results-dir', type=Path, default=RESULTS_DIR)
+args = parser.parse_args()
+DATA_FILE, MODEL_DIR, RESULTS_DIR = args.data, args.model_dir, args.results_dir
+os.environ.setdefault('MPLCONFIGDIR', str(RESULTS_DIR.resolve() / '.matplotlib'))
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 MODEL_FILE = MODEL_DIR / "xgboost_energy_model.joblib"
 METRICS_FILE = RESULTS_DIR / "prediction_metrics.json"
@@ -177,6 +189,8 @@ with open(METRICS_FILE, "w", encoding="utf-8") as f:
 
 predictions = pd.DataFrame({
     "Time": test_times,
+    "target_time": test_times + pd.Timedelta(minutes=15),
+    "forecast_issued_at": test_times + pd.Timedelta(minutes=15),
     "actual_power": y_test.to_numpy(),
     "predicted_power": y_pred,
 })
