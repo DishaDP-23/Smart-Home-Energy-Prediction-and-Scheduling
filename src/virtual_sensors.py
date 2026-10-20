@@ -1,26 +1,27 @@
 
 """
-Virtual Sensor Simulator
-AIoT-Based Intelligent Home Energy Management
+Replay recorded household energy measurements from house1_15min.csv.
 
-Features:
-- Realistic synthetic appliance operating patterns
-- Timestamped CSV logging
-- MQTT telemetry publishing to ThingsBoard
-- Automatic MQTT reconnection attempts
-- Compatible with the existing Streamlit dashboard
+- Does not generate random or synthetic household readings.
+- Saves replayed records to data/replayed_energy.csv.
+- Optionally publishes recorded telemetry to ThingsBoard using MQTT.
+- Preserves the original dataset timestamps.
 """
 
 import csv
 import json
 import os
-import random
 import time
 from datetime import datetime
 from pathlib import Path
 
-import paho.mqtt.client as mqtt
+import pandas as pd
 from dotenv import load_dotenv
+
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
 
 
 # --------------------------------------------------
@@ -28,335 +29,290 @@ from dotenv import load_dotenv
 # --------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+SOURCE_FILE = PROJECT_ROOT / "house1_15min.csv"
 DATA_DIR = PROJECT_ROOT / "data"
-CSV_FILE = DATA_DIR / "sample_energy.csv"
+OUTPUT_FILE = DATA_DIR / "replayed_energy.csv"
 
 load_dotenv(PROJECT_ROOT / ".env")
 
 HOST = os.getenv("THINGSBOARD_HOST", "mqtt.thingsboard.cloud")
 TOKEN = os.getenv("THINGSBOARD_TOKEN")
 
-INTERVAL_SECONDS = 2
+# Delay between replayed rows; this is not the dataset's sampling interval.
+INTERVAL_SECONDS = 0.2
 
-# Rated power in watts.
-APPLIANCES = {
-    "lights": 60,
-    "fan": 75,
-    "refrigerator": 150,
-    "television": 100,
-    "washing_machine": 500,
-}
+APPLIANCE_COLUMNS = [
+    f"Appliance{i}" for i in range(1, 10)
+]
 
-CSV_FIELDS = [
+OUTPUT_FIELDS = [
     "timestamp",
-    *APPLIANCES.keys(),
+    *APPLIANCE_COLUMNS,
     "total_power_w",
 ]
 
 
 # --------------------------------------------------
-# Appliance simulation
+# Load and validate the original dataset
 # --------------------------------------------------
 
-class ApplianceSimulator:
-    """
-    Maintains appliance states across readings instead
-    of randomly switching every appliance every time.
-    """
+def load_recorded_data():
+    """Load real measurements without modifying the source file."""
 
-    def __init__(self):
-        self.states = {
-            "lights": False,
-            "fan": False,
-            "refrigerator": True,
-            "television": False,
-            "washing_machine": False,
-        }
-
-        self.next_change = {
-            appliance: time.monotonic()
-            + random.uniform(5, 20)
-            for appliance in APPLIANCES
-        }
-
-        self.washing_machine_end = 0.0
-        self.refrigerator_cycle_end = (
-            time.monotonic() + random.uniform(10, 25)
+    if not SOURCE_FILE.exists():
+        raise FileNotFoundError(
+            f"Dataset not found: {SOURCE_FILE}"
         )
 
-    def update_state(self, appliance, now):
-        """Update an appliance according to its operating pattern."""
+    data = pd.read_csv(SOURCE_FILE)
 
-        if appliance == "refrigerator":
-            # A refrigerator cycles between running and idle.
-            if now >= self.refrigerator_cycle_end:
-                self.states["refrigerator"] = (
-                    not self.states["refrigerator"]
-                )
+    required_columns = {
+        "Time",
+        "Aggregate",
+        *APPLIANCE_COLUMNS,
+    }
 
-                if self.states["refrigerator"]:
-                    self.refrigerator_cycle_end = (
-                        now + random.uniform(15, 35)
-                    )
-                else:
-                    self.refrigerator_cycle_end = (
-                        now + random.uniform(8, 20)
-                    )
+    missing = required_columns - set(data.columns)
 
-        elif appliance == "washing_machine":
-            # Once started, the washing machine runs for
-            # a longer cycle instead of switching every sample.
-            if now >= self.washing_machine_end:
-                if self.states["washing_machine"]:
-                    self.states["washing_machine"] = False
-                    self.next_change[appliance] = (
-                        now + random.uniform(30, 60)
-                    )
-                elif now >= self.next_change[appliance]:
-                    # Occasional simulated wash cycle.
-                    if random.random() < 0.35:
-                        self.states["washing_machine"] = True
-                        self.washing_machine_end = (
-                            now + random.uniform(30, 60)
-                        )
-                    else:
-                        self.next_change[appliance] = (
-                            now + random.uniform(20, 45)
-                        )
-
-        else:
-            # Lights, fan, and television remain in their
-            # current state for a while before changing.
-            if now >= self.next_change[appliance]:
-                self.states[appliance] = (
-                    not self.states[appliance]
-                )
-                self.next_change[appliance] = (
-                    now + random.uniform(15, 45)
-                )
-
-    def generate_reading(self):
-        """Generate one timestamped household power reading."""
-
-        now = time.monotonic()
-        readings = {}
-
-        for appliance, rated_power in APPLIANCES.items():
-            self.update_state(appliance, now)
-
-            if self.states[appliance]:
-                # Running power varies around rated power.
-                power = random.uniform(
-                    0.7 * rated_power,
-                    rated_power,
-                )
-            else:
-                power = 0.0
-
-            readings[appliance] = round(power, 2)
-
-        readings["timestamp"] = datetime.now().isoformat(
-            timespec="seconds"
+    if missing:
+        raise ValueError(
+            "Dataset is missing required columns: "
+            + ", ".join(sorted(missing))
         )
 
-        readings["total_power_w"] = round(
-            sum(
-                readings[name]
-                for name in APPLIANCES
-            ),
-            2,
-        )
+    data = data[
+        ["Time", "Aggregate", *APPLIANCE_COLUMNS]
+    ].copy()
 
-        return readings
-
-
-# --------------------------------------------------
-# CSV logging
-# --------------------------------------------------
-
-def save_reading(reading):
-    """Append a reading to the CSV file."""
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    file_exists = (
-        CSV_FILE.exists()
-        and CSV_FILE.stat().st_size > 0
+    data["Time"] = pd.to_datetime(
+        data["Time"], errors="raise"
     )
 
-    with CSV_FILE.open(
-        "a",
-        newline="",
-        encoding="utf-8",
-    ) as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=CSV_FIELDS,
+    if data["Time"].duplicated().any():
+        raise ValueError(
+            "The source dataset contains duplicate timestamps."
         )
 
-        if not file_exists:
-            writer.writeheader()
+    data = data.sort_values("Time").reset_index(drop=True)
 
-        writer.writerow(reading)
+    numeric_columns = ["Aggregate", *APPLIANCE_COLUMNS]
+
+    for column in numeric_columns:
+        data[column] = pd.to_numeric(
+            data[column], errors="raise"
+        )
+
+    if data[numeric_columns].isna().any().any():
+        raise ValueError(
+            "The source dataset contains missing power readings."
+        )
+
+    if (data[numeric_columns] < 0).any().any():
+        raise ValueError(
+            "Negative power readings were found in the dataset."
+        )
+
+    return data
 
 
 # --------------------------------------------------
-# ThingsBoard MQTT connection
+# CSV output
+# --------------------------------------------------
+
+def save_reading(reading, writer):
+    """Write one recorded reading to the replay CSV."""
+
+    writer.writerow(reading)
+
+
+# --------------------------------------------------
+# Optional ThingsBoard MQTT connection
 # --------------------------------------------------
 
 def create_mqtt_client():
-    """Connect to ThingsBoard using the device access token."""
+    """Connect to ThingsBoard when MQTT credentials are available."""
 
     if not TOKEN:
-        raise RuntimeError(
-            "THINGSBOARD_TOKEN is missing from the project .env file."
+        print(
+            "THINGSBOARD_TOKEN is not set. "
+            "Local CSV replay will continue without MQTT."
         )
+        return None
+
+    if mqtt is None:
+        print(
+            "paho-mqtt is not installed. "
+            "Local CSV replay will continue without MQTT."
+        )
+        return None
 
     client = mqtt.Client(
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        client_id="home-energy-virtual-sensors",
+        client_id="home-energy-dataset-replay",
     )
 
     client.username_pw_set(TOKEN)
 
-    print(f"Connecting to {HOST}:1883 ...")
-    client.connect(HOST, 1883, 60)
-    client.loop_start()
+    try:
+        print(f"Connecting to {HOST}:1883 ...")
+        client.connect(HOST, 1883, 60)
+        client.loop_start()
 
-    for _ in range(50):
-        if client.is_connected():
-            print("Connected to ThingsBoard MQTT.")
-            return client
+        for _ in range(50):
+            if client.is_connected():
+                print("Connected to ThingsBoard MQTT.")
+                return client
 
-        time.sleep(0.1)
+            time.sleep(0.1)
 
-    client.loop_stop()
+        client.loop_stop()
+        client.disconnect()
 
-    raise ConnectionError(
-        "Could not establish the MQTT connection."
-    )
+        print(
+            "ThingsBoard connection timed out. "
+            "Local CSV replay will continue."
+        )
+
+    except (OSError, RuntimeError) as error:
+        print(
+            f"ThingsBoard connection failed: {error}\n"
+            "Local CSV replay will continue."
+        )
+
+    return None
 
 
 def publish_reading(client, reading):
-    """Publish appliance telemetry to ThingsBoard."""
+    """Publish a recorded row using its original dataset timestamp."""
+
+    if client is None or not client.is_connected():
+        return False
+
+    source_time = pd.Timestamp(reading["timestamp"])
+
+    # Preserve an explicit timezone if present. For timezone-naive
+    # dataset timestamps, use the computer's local timezone.
+    timestamp_ms = int(source_time.timestamp() * 1000)
 
     telemetry_values = {
-        key: value
+        key: float(value)
         for key, value in reading.items()
         if key != "timestamp"
     }
-
-    timestamp_ms = int(
-        datetime.fromisoformat(
-            reading["timestamp"]
-        ).timestamp() * 1000
-    )
 
     payload = {
         "ts": timestamp_ms,
         "values": telemetry_values,
     }
 
-    info = client.publish(
-        "v1/devices/me/telemetry",
-        json.dumps(payload),
-        qos=1,
-    )
-
-    if info.rc != mqtt.MQTT_ERR_SUCCESS:
-        print(
-            "Publish could not be queued. "
-            f"Error code: {info.rc}"
-        )
-        return False
-
     try:
+        info = client.publish(
+            "v1/devices/me/telemetry",
+            json.dumps(payload),
+            qos=1,
+        )
+
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            print(
+                f"Telemetry could not be queued: {info.rc}"
+            )
+            return False
+
         info.wait_for_publish(timeout=10)
-    except RuntimeError as error:
-        print(f"MQTT publish error: {error}")
-        return False
 
-    if info.is_published():
-        print("ThingsBoard confirmed telemetry.")
-        return True
+        if info.is_published():
+            print("ThingsBoard confirmed telemetry.")
+            return True
 
-    print("WARNING: MQTT publish confirmation timed out.")
+        print("WARNING: Telemetry confirmation timed out.")
+
+    except (OSError, RuntimeError) as error:
+        print(f"Telemetry publishing failed: {error}")
+
     return False
 
 
 # --------------------------------------------------
-# Main simulator
+# Historical dataset replay
 # --------------------------------------------------
 
-def run_simulator(interval_seconds=INTERVAL_SECONDS):
-    """Run the simulator until the user stops it."""
+def run_replay(interval_seconds=INTERVAL_SECONDS):
+    """Replay the source dataset sequentially, from first row to last."""
 
     if interval_seconds <= 0:
         raise ValueError(
-            "The interval must be greater than zero."
+            "interval_seconds must be greater than zero."
         )
 
-    simulator = ApplianceSimulator()
+    data = load_recorded_data()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
     client = create_mqtt_client()
 
-    print(f"Saving readings to: {CSV_FILE}")
+    print(f"Source dataset: {SOURCE_FILE}")
+    print(f"Replay output:  {OUTPUT_FILE}")
+    print(f"Recorded rows:  {len(data)}")
+    print(f"Replay delay:   {interval_seconds} seconds")
     print(
-        f"Publishing every {interval_seconds} seconds."
+        "\nIMPORTANT: Values are recorded historical measurements, "
+        "not current physical sensor readings."
     )
-    print("Press Ctrl+C to stop.\n")
+    print("Press Ctrl+C to stop replay.\n")
 
     try:
-        while True:
-            if not client.is_connected():
-                print("MQTT disconnected. Reconnecting...")
+        # Start a clean replay file. Never append to old synthetic data.
+        with OUTPUT_FILE.open(
+            "w", newline="", encoding="utf-8"
+        ) as output_file:
 
-                try:
-                    client.reconnect()
-
-                    for _ in range(50):
-                        if client.is_connected():
-                            break
-                        time.sleep(0.1)
-
-                except (OSError, RuntimeError) as error:
-                    print(f"Reconnection failed: {error}")
-                    time.sleep(5)
-                    continue
-
-                if not client.is_connected():
-                    print("Still disconnected. Retrying shortly.")
-                    time.sleep(5)
-                    continue
-
-                print("MQTT reconnected.")
-
-            reading = simulator.generate_reading()
-
-            # Local logging continues even if publishing fails.
-            try:
-                save_reading(reading)
-            except OSError as error:
-                print(f"CSV write failed: {error}")
-
-            publish_reading(client, reading)
-
-            print(
-                f"{reading['timestamp']} | "
-                f"Total: {reading['total_power_w']} W | "
-                "CSV logging attempted"
+            writer = csv.DictWriter(
+                output_file,
+                fieldnames=OUTPUT_FIELDS,
             )
+            writer.writeheader()
 
-            time.sleep(interval_seconds)
+            for index, row in data.iterrows():
+                source_timestamp = pd.Timestamp(row["Time"]).isoformat()
+
+                reading = {
+                    "timestamp": source_timestamp,
+                    **{
+                        column: float(row[column])
+                        for column in APPLIANCE_COLUMNS
+                    },
+                    "total_power_w": float(row["Aggregate"]),
+                }
+
+                save_reading(reading, writer)
+                output_file.flush()
+
+                publish_reading(client, reading)
+
+                print(
+                    f"[{index + 1}/{len(data)}] "
+                    f"{source_timestamp} | "
+                    f"Recorded aggregate: "
+                    f"{reading['total_power_w']:.2f} W"
+                )
+
+                if index < len(data) - 1:
+                    time.sleep(interval_seconds)
+
+        print("\nDataset replay completed.")
 
     except KeyboardInterrupt:
-        print("\nVirtual sensor simulator stopped.")
+        print("\nDataset replay stopped by user.")
 
     finally:
-        if client.is_connected():
-            client.disconnect()
-
-        client.loop_stop()
+        if client is not None:
+            try:
+                if client.is_connected():
+                    client.disconnect()
+                client.loop_stop()
+            except (OSError, RuntimeError):
+                pass
 
 
 if __name__ == "__main__":
-    run_simulator()
+    run_replay()

@@ -26,11 +26,11 @@ import streamlit as st
 # --------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CSV_FILE = PROJECT_ROOT / "data" / "sample_energy.csv"
+CSV_FILE = PROJECT_ROOT / "data" / "replayed_energy.csv"
 
 REFRESH_SECONDS = 2
 MAX_GRAPH_READINGS = 100
-MAX_ENERGY_GAP_SECONDS = 10
+MAX_ENERGY_GAP_SECONDS = 900
 ELECTRICITY_TARIFF = 6.0  # Estimated ₹ per kWh
 
 TIME_RANGES = {
@@ -276,61 +276,13 @@ def display_dashboard():
     )
 
     # Handle timezone-aware and timezone-naive timestamps.
-    latest_timestamp = (
-        latest["timestamp"].to_pydatetime()
+    # Display the timestamp of the latest recorded measurement.
+    latest_timestamp = data.iloc[-1]["timestamp"]
+
+    st.info(
+        "Historical dataset replay — displaying recorded "
+        f"measurements. Latest record: {latest_timestamp}"
     )
-
-    if latest_timestamp.tzinfo is not None:
-        now = datetime.now(timezone.utc)
-
-        latest_timestamp_for_display = (
-            latest_timestamp.astimezone(
-                timezone.utc
-            )
-        )
-
-        comparison_timestamp = (
-            latest_timestamp.astimezone(
-                timezone.utc
-            )
-        )
-    else:
-        now = datetime.now()
-
-        latest_timestamp_for_display = (
-            latest_timestamp
-        )
-
-        comparison_timestamp = latest_timestamp
-
-    age_seconds = max(
-        0,
-        (
-            now - comparison_timestamp
-        ).total_seconds(),
-    )
-
-    # --------------------------------------------------
-    # Data freshness
-    # --------------------------------------------------
-
-    if age_seconds <= 6:
-        st.success(
-            "● Sensor data is updating"
-        )
-
-    elif age_seconds <= 15:
-        st.warning(
-            "● No recent update for "
-            f"{age_seconds:.0f} seconds"
-        )
-
-    else:
-        st.error(
-            "● Sensor data appears stale "
-            f"({age_seconds / 60:.1f} minutes "
-            "since last reading)"
-        )
 
     # --------------------------------------------------
     # Current household consumption
@@ -356,9 +308,7 @@ def display_dashboard():
 
     col3.metric(
         "Latest Reading",
-        latest_timestamp_for_display.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
+        str(latest_timestamp),
     )
 
     st.caption(
