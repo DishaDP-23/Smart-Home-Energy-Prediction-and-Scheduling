@@ -11,3 +11,5 @@ results/test_predictions.csv
 results/baseline_predictions.csv
 results/scheduling_simulation.csv
 results/scheduling_metrics_by_day.csv
+
+data/sample_energy.csv
