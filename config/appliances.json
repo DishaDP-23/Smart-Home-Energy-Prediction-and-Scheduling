@@ -1,0 +1,14 @@
+{
+  "slot_minutes": 15,
+  "max_household_kw": 5.0,
+  "off_peak_threshold": 4.0,
+  "cost_weight": 1.0,
+  "peak_weight": 2.0,
+  "delay_weight": 0.15,
+  "currency": "demo_units",
+  "jobs": [
+    {"id": "washing_machine", "power_kw": 1.0, "duration_minutes": 60, "requested_start": "2026-01-01T18:00:00", "earliest_start": "2026-01-01T18:00:00", "latest_finish": "2026-01-02T00:00:00", "max_delay_minutes": 240, "priority": 3},
+    {"id": "dishwasher", "power_kw": 1.2, "duration_minutes": 90, "requested_start": "2026-01-01T18:00:00", "earliest_start": "2026-01-01T18:00:00", "latest_finish": "2026-01-02T00:00:00", "max_delay_minutes": 240, "priority": 2},
+    {"id": "dryer", "power_kw": 1.8, "duration_minutes": 60, "requested_start": "2026-01-01T19:00:00", "earliest_start": "2026-01-01T19:00:00", "latest_finish": "2026-01-02T00:00:00", "max_delay_minutes": 180, "priority": 1}
+  ]
+}
