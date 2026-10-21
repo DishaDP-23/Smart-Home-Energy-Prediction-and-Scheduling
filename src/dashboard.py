@@ -20,13 +20,26 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import json
 
+from predictor import Predictor
+from src.appliance_mapping import get_appliance_name
 # --------------------------------------------------
 # Project configuration
 # --------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Existing dashboard data
 CSV_FILE = PROJECT_ROOT / "data" / "replayed_energy.csv"
+
+# Original historical dataset used for XGBoost forecasting
+FORECAST_DATASET = PROJECT_ROOT / "house1_15min.csv"
+
+# Existing rolling-scheduler evaluation results
+SCHEDULING_RESULTS_DIR = PROJECT_ROOT / "rolling"
+SCHEDULING_SUMMARY_FILE = SCHEDULING_RESULTS_DIR / "summary.csv"
+SCHEDULING_REPORT_FILE = SCHEDULING_RESULTS_DIR / "report.json"
 
 REFRESH_SECONDS = 2
 MAX_GRAPH_READINGS = 100
@@ -52,8 +65,9 @@ st.set_page_config(
 # Load and validate sensor data
 # --------------------------------------------------
 
+
 def load_sensor_data():
-    """Read the CSV and validate its contents."""
+    """Read the replay CSV and preserve original model column names."""
 
     if not CSV_FILE.exists():
         return None
@@ -96,6 +110,16 @@ def load_sensor_data():
         .reset_index(drop=True)
     )
 
+    # Friendly CSV/ThingsBoard names -> original internal names.
+    from src.appliance_mapping import APPLIANCE_NAMES
+
+    reverse_mapping = {
+        friendly_name: original_name
+        for original_name, friendly_name in APPLIANCE_NAMES.items()
+    }
+
+    data = data.rename(columns=reverse_mapping)
+
     appliance_columns = [
         column
         for column in data.columns
@@ -109,6 +133,66 @@ def load_sensor_data():
 
     return data
 
+
+
+@st.cache_resource
+def load_predictor():
+    """Load the trained XGBoost model once."""
+    return Predictor()
+
+
+@st.cache_data
+def load_forecast_history():
+    """Load and prepare the original recorded dataset."""
+    if not FORECAST_DATASET.exists():
+        raise FileNotFoundError(
+            f"Forecast dataset not found: {FORECAST_DATASET}"
+        )
+
+    history = pd.read_csv(FORECAST_DATASET)
+
+    required_columns = [
+        "Time",
+        "Aggregate",
+        *[f"Appliance{i}" for i in range(1, 10)],
+    ]
+
+    missing = [
+        column for column in required_columns
+        if column not in history.columns
+    ]
+
+    if missing:
+        raise ValueError(
+            f"Missing forecast dataset columns: {missing}"
+        )
+
+    history = history[required_columns].copy()
+    history["Time"] = pd.to_datetime(
+        history["Time"], errors="coerce"
+    )
+
+    for column in required_columns[1:]:
+        history[column] = pd.to_numeric(
+            history[column], errors="coerce"
+        )
+
+    history = (
+    history.dropna(subset=required_columns)
+    .sort_values("Time")
+    .drop_duplicates(subset=["Time"], keep="last")
+    .reset_index(drop=True)
+    )
+
+    # Keep only the latest uninterrupted 15-minute sequence.
+    if not history.empty:
+        time_gaps = history["Time"].diff()
+        gap_positions = time_gaps[time_gaps != pd.Timedelta(minutes=15)].index
+
+        if len(gap_positions) > 0:
+            history = history.iloc[gap_positions[-1]:].reset_index(drop=True)
+
+    return history
 
 # --------------------------------------------------
 # Historical time-range filtering
@@ -196,9 +280,7 @@ def calculate_appliance_analytics(
         )
 
         rows.append({
-            "Appliance": appliance.replace(
-                "_", " "
-            ).title(),
+            "Appliance": get_appliance_name(appliance),
             "Energy (kWh)": energy_kwh,
             "Estimated Cost (₹)": (
                 energy_kwh * ELECTRICITY_TARIFF
@@ -236,13 +318,210 @@ def calculate_appliance_analytics(
 # Dashboard
 # --------------------------------------------------
 
+def display_scheduling_evaluation():
+    """Display the existing rolling-scheduler evaluation results."""
+
+    st.header("Appliance Scheduling Performance")
+    st.caption(
+        "Offline evaluation on recorded REFIT household consumption, "
+        "with additional simulated appliance jobs."
+    )
+
+    if not SCHEDULING_SUMMARY_FILE.exists():
+        st.warning(
+            "Scheduling summary not found. Expected file: "
+            f"{SCHEDULING_SUMMARY_FILE}"
+        )
+        return
+
+    try:
+        summary = pd.read_csv(SCHEDULING_SUMMARY_FILE)
+
+        required = [
+            "method",
+            "comparable_days",
+            "scheduled_jobs",
+            "unserved_jobs",
+            "job_constraint_violations",
+            "new_over_cap_slots",
+            "mean_served_delay_minutes",
+            "comparable_mean_daily_peak_kw",
+            "comparable_total_cost",
+            "comparable_mean_daily_peak_kw_reduction_percent",
+            "comparable_total_cost_reduction_percent",
+        ]
+
+        missing = [column for column in required if column not in summary.columns]
+
+        if missing:
+            st.error(f"Scheduling summary is missing columns: {missing}")
+            return
+
+        summary = summary[required].copy()
+        summary["method"] = summary["method"].astype(str)
+
+        if summary["method"].duplicated().any():
+            st.error("The scheduling summary contains duplicate methods.")
+            return
+
+        if not {"unscheduled", "rule_based", "adaptive"}.issubset(
+            set(summary["method"])
+        ):
+            st.error("The summary must contain all three scheduling methods.")
+            return
+
+        summary = summary.set_index("method").loc[
+            ["unscheduled", "rule_based", "adaptive"]
+        ].reset_index()
+
+        report = {}
+        if SCHEDULING_REPORT_FILE.exists():
+            with open(SCHEDULING_REPORT_FILE, encoding="utf-8") as file:
+                report = json.load(file)
+
+    except (OSError, ValueError, KeyError, pd.errors.ParserError) as exc:
+        st.error(f"Could not load scheduling evaluation: {exc}")
+        return
+
+    adaptive = summary.loc[summary["method"] == "adaptive"].iloc[0]
+    unscheduled = summary.loc[summary["method"] == "unscheduled"].iloc[0]
+
+    days = int(adaptive["comparable_days"])
+
+    st.info(
+        f"Evaluation scenario: {report.get('scenario', 'Not specified')}. "
+        f"Results cover {days} comparable days."
+    )
+
+    # Main adaptive-scheduler results
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric(
+        "Mean Daily Peak",
+        f"{adaptive['comparable_mean_daily_peak_kw']:.3f} kW",
+        delta=(
+            f"{adaptive['comparable_mean_daily_peak_kw_reduction_percent']:.2f}% "
+            "vs. unscheduled"
+        ),
+    )
+
+    col2.metric(
+        "Simulated Cost",
+        f"{adaptive['comparable_total_cost']:,.2f} demo units",
+        delta=(
+            f"{adaptive['comparable_total_cost_reduction_percent']:.2f}% "
+            "vs. unscheduled"
+        ),
+    )
+
+    col3.metric(
+        "Unserved Jobs",
+        f"{int(adaptive['unserved_jobs'])}",
+    )
+
+    col4.metric(
+        "New Over-Cap Slots",
+        f"{int(adaptive['new_over_cap_slots'])}",
+    )
+
+    st.subheader("Compare Scheduling Strategies")
+
+    comparison = summary.set_index("method")
+
+    comparison = comparison.rename(
+        index={
+            "unscheduled": "Unscheduled",
+            "rule_based": "Rule-based",
+            "adaptive": "Adaptive",
+        }
+    )
+
+    peak_chart = comparison[
+        ["comparable_mean_daily_peak_kw"]
+    ].rename(
+        columns={
+            "comparable_mean_daily_peak_kw": "Mean Daily Peak (kW)"
+        }
+    )
+
+    cost_chart = comparison[
+        ["comparable_total_cost"]
+    ].rename(
+        columns={
+            "comparable_total_cost": "Total Simulated Cost (demo units)"
+        }
+    )
+
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        st.markdown("**Mean daily peak demand**")
+        st.bar_chart(peak_chart)
+
+    with chart_col2:
+        st.markdown("**Total simulated cost**")
+        st.bar_chart(cost_chart)
+
+    display = summary[
+        [
+            "method",
+            "comparable_days",
+            "scheduled_jobs",
+            "unserved_jobs",
+            "mean_served_delay_minutes",
+            "comparable_mean_daily_peak_kw",
+            "comparable_mean_daily_peak_kw_reduction_percent",
+            "comparable_total_cost",
+            "comparable_total_cost_reduction_percent",
+            "new_over_cap_slots",
+            "job_constraint_violations",
+        ]
+    ].copy()
+
+    display = display.rename(
+        columns={
+            "method": "Strategy",
+            "comparable_days": "Comparable Days",
+            "scheduled_jobs": "Jobs Scheduled",
+            "unserved_jobs": "Unserved Jobs",
+            "mean_served_delay_minutes": "Mean Delay (min)",
+            "comparable_mean_daily_peak_kw": "Mean Daily Peak (kW)",
+            "comparable_mean_daily_peak_kw_reduction_percent":
+                "Peak Reduction (%)",
+            "comparable_total_cost": "Total Cost (demo units)",
+            "comparable_total_cost_reduction_percent":
+                "Cost Reduction (%)",
+            "new_over_cap_slots": "New Over-Cap Slots",
+            "job_constraint_violations": "Job Constraint Violations",
+        }
+    )
+
+    display["Mean Delay (min)"] = display["Mean Delay (min)"].round(1)
+    display["Mean Daily Peak (kW)"] = display["Mean Daily Peak (kW)"].round(3)
+    display["Peak Reduction (%)"] = display["Peak Reduction (%)"].round(2)
+    display["Total Cost (demo units)"] = (
+        display["Total Cost (demo units)"].round(2)
+    )
+    display["Cost Reduction (%)"] = display["Cost Reduction (%)"].round(2)
+
+    st.dataframe(display, hide_index=True, use_container_width=True)
+
+    st.caption(
+        "Methodology: the current 15-minute forecast is held constant "
+        "over each job's duration for admission checks. The appliance jobs "
+        "are additional simulated loads, not shifts of measured appliance "
+        "cycles. Tariffs are illustrative demo units, not actual electricity "
+        "rates or verified bill savings. Over-cap slots include situations "
+        "where household consumption exceeds the configured power cap."
+    )
+
 def display_dashboard():
 
     st.title("⚡ Smart Home Energy Management")
 
     st.caption(
-        "Live virtual sensor monitoring | "
-        "Streamlit + Python + ThingsBoard MQTT"
+       "Historical Energy Monitoring | "
+"XGBoost Forecasting | Adaptive Appliance Scheduling"
     )
 
     data = load_sensor_data()
@@ -296,12 +575,12 @@ def display_dashboard():
     col1, col2, col3 = st.columns(3)
 
     col1.metric(
-        "Current Power",
+        "Latest Recorded Power",
         f"{latest_power:,.2f} W",
     )
 
     col2.metric(
-        "Active Appliances",
+        "Appliances Active in Latest Record",
         f"{active_appliances} / "
         f"{len(appliance_columns)}",
     )
@@ -316,7 +595,53 @@ def display_dashboard():
         "always reflect the latest available reading, "
         "regardless of the historical filter."
     )
+    
+    # --------------------------------------------------
+    # XGBoost next-interval forecast
+    # --------------------------------------------------
 
+    st.subheader("Next-Interval Energy Forecast")
+
+    try:
+        forecast_history = load_forecast_history()
+        predictor = load_predictor()
+
+        if len(forecast_history) < 97:
+            st.warning(
+                "At least 97 valid historical readings "
+                "are required for forecasting."
+            )
+        else:
+            history_window = forecast_history.tail(97).copy()
+            forecast = predictor.predict_next(history_window)
+
+            forecast_col1, forecast_col2 = st.columns(2)
+
+            forecast_col1.metric(
+                "Predicted Aggregate Power",
+                f"{forecast['predicted_aggregate_kw'] * 1000:,.2f} W",
+            )
+
+            forecast_col2.metric(
+                "Forecast Timestamp",
+                forecast["timestamp"],
+            )
+
+            st.caption(
+                "XGBoost forecast for the next 15-minute interval, "
+                "based on recorded historical measurements. "
+                "This is not a live measurement."
+            )
+
+    except (FileNotFoundError, ValueError, KeyError, OSError) as exc:
+        st.warning(f"Forecast unavailable: {exc}")
+
+    except Exception as exc:
+        st.error(
+            f"An unexpected forecasting error occurred: {exc}"
+        )
+        
+    display_scheduling_evaluation()
     st.divider()
 
     # --------------------------------------------------
@@ -469,7 +794,7 @@ def display_dashboard():
 
     appliance_data = pd.DataFrame({
         "Appliance": [
-            column.replace("_", " ").title()
+            get_appliance_name(column)
             for column in appliance_columns
         ],
         "Power (W)": [
@@ -496,6 +821,8 @@ def display_dashboard():
             hide_index=True,
             use_container_width=True,
         )
+
+    
 
     st.divider()
 
@@ -576,8 +903,15 @@ def display_dashboard():
             ascending=False,
         )
 
+        recent_display = recent_table.rename(
+        columns={
+            column: get_appliance_name(column)
+            for column in appliance_columns
+        }
+    )
+        
         st.dataframe(
-            recent_table,
+            recent_display,
             hide_index=True,
             use_container_width=True,
         )

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+from appliance_mapping import APPLIANCE_NAMES
 
 try:
     import paho.mqtt.client as mqtt
@@ -48,7 +49,7 @@ APPLIANCE_COLUMNS = [
 
 OUTPUT_FIELDS = [
     "timestamp",
-    *APPLIANCE_COLUMNS,
+    *[APPLIANCE_NAMES[column] for column in APPLIANCE_COLUMNS],
     "total_power_w",
 ]
 
@@ -278,7 +279,7 @@ def run_replay(interval_seconds=INTERVAL_SECONDS):
                 reading = {
                     "timestamp": source_timestamp,
                     **{
-                        column: float(row[column])
+                        APPLIANCE_NAMES[column]: float(row[column])
                         for column in APPLIANCE_COLUMNS
                     },
                     "total_power_w": float(row["Aggregate"]),
