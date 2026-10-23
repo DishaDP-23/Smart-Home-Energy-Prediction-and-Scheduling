@@ -34,6 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_FILE = PROJECT_ROOT / "house1_15min.csv"
 DATA_DIR = PROJECT_ROOT / "data"
 OUTPUT_FILE = DATA_DIR / "replayed_energy.csv"
+HISTORICAL_FILE = PROJECT_ROOT / "historical_measurements.csv"
 
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -127,6 +128,45 @@ def save_reading(reading, writer):
     writer.writerow(reading)
 
 
+
+def save_confirmed_measurement(reading):
+    """Append a confirmed reading only if its timestamp is new."""
+
+    HISTORICAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = str(reading["timestamp"])
+
+    if HISTORICAL_FILE.exists() and HISTORICAL_FILE.stat().st_size > 0:
+        existing = pd.read_csv(
+            HISTORICAL_FILE,
+            usecols=["timestamp"],
+            dtype={"timestamp": str},
+        )
+
+        existing_timestamps = set(existing["timestamp"].dropna())
+
+        if timestamp in existing_timestamps:
+            return
+
+    file_exists = (
+        HISTORICAL_FILE.exists()
+        and HISTORICAL_FILE.stat().st_size > 0
+    )
+
+    with HISTORICAL_FILE.open(
+        "a", newline="", encoding="utf-8"
+    ) as historical_file:
+        writer = csv.DictWriter(
+            historical_file,
+            fieldnames=OUTPUT_FIELDS,
+        )
+
+        if not file_exists:
+            writer.writeheader()
+
+        writer.writerow(reading)
+        historical_file.flush()
+
+
 # --------------------------------------------------
 # Optional ThingsBoard MQTT connection
 # --------------------------------------------------
@@ -194,8 +234,7 @@ def publish_reading(client, reading):
 
     # Preserve an explicit timezone if present. For timezone-naive
     # dataset timestamps, use the computer's local timezone.
-    timestamp_ms = int(source_time.timestamp() * 1000)
-
+    timestamp_ms = int(time.time() * 1000)
     telemetry_values = {
         key: float(value)
         for key, value in reading.items()
@@ -246,10 +285,29 @@ def run_replay(interval_seconds=INTERVAL_SECONDS):
             "interval_seconds must be greater than zero."
         )
 
+    
     data = load_recorded_data()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Resume from timestamps not already saved.
+    if HISTORICAL_FILE.exists() and HISTORICAL_FILE.stat().st_size > 0:
+        historical = pd.read_csv(
+            HISTORICAL_FILE,
+            usecols=["timestamp"],
+        )
+
+        latest_saved = pd.to_datetime(
+            historical["timestamp"], errors="raise"
+        ).max()
+
+        data = data[data["Time"] > latest_saved].reset_index(drop=True)
+
+    if data.empty:
+        print("No new dataset records to replay.")
+        return
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     client = create_mqtt_client()
+
 
     print(f"Source dataset: {SOURCE_FILE}")
     print(f"Replay output:  {OUTPUT_FILE}")
@@ -288,7 +346,10 @@ def run_replay(interval_seconds=INTERVAL_SECONDS):
                 save_reading(reading, writer)
                 output_file.flush()
 
-                publish_reading(client, reading)
+                published = publish_reading(client, reading)
+
+                if published:
+                    save_confirmed_measurement(reading)
 
                 print(
                     f"[{index + 1}/{len(data)}] "

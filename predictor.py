@@ -46,6 +46,9 @@ class Predictor:
         prediction = float(self.model.predict(features)[0])
         if not np.isfinite(prediction):
             raise ValueError('Model returned a nonfinite prediction')
-        return dict(timestamp=target.isoformat(), forecast_issued_at=target.isoformat(),
+        return dict(
+                    timestamp=target.isoformat(),
+                    forecast_issued_at=pd.Timestamp.now().isoformat(),
                     predicted_aggregate_kw=max(0, prediction)/1000,
-                    negative_prediction_clipped=prediction < 0)
+                    negative_prediction_clipped=prediction < 0
+                )

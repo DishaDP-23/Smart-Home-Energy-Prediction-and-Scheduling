@@ -1,0 +1,4 @@
+method,evaluated_days,comparable_days,scheduled_jobs,unserved_jobs,unserved_energy_kwh,job_constraint_violations,actual_power_cap_violation_slots,base_already_over_cap_slots,new_over_cap_slots,mean_served_delay_minutes,comparable_mean_daily_peak_kw,comparable_total_cost,comparable_added_job_cost,comparable_mean_daily_peak_kw_reduction_percent,comparable_total_cost_reduction_percent
+unscheduled,68,68,204,0,0.0,0,14,4,10,0.0,4.063508533051892,7039.61287099054,3128.0,0.0,0.0
+rule_based,68,68,204,0,0.0,0,8,4,4,160.0,4.467649538593925,5162.81287099054,1251.1999999999998,-9.945617248119895,26.66055697088235
+adaptive,68,68,204,0,0.0,0,7,4,3,180.0,3.886867101210744,5162.81287099054,1251.2,4.347017618011052,26.66055697088235

@@ -1,0 +1,20 @@
+{
+  "observed_timestamp": "2013-10-12T01:45:00",
+  "forecast": {
+    "timestamp": "2013-10-12T02:00:00",
+    "forecast_issued_at": "2013-10-12T02:00:00",
+    "predicted_aggregate_kw": 0.2053469696044922,
+    "negative_prediction_clipped": false
+  },
+  "status": "running",
+  "history_intervals": 97,
+  "current_simulated_appliance_kw": 0.0,
+  "current_total_kw": 0.19023021582733812,
+  "active_simulated_jobs": [],
+  "schedule": [],
+  "updates": [],
+  "replay_events": [],
+  "schedule_timestamp": "2013-10-12T02:00:00",
+  "predicted_total_kw": 0.2053469696044922,
+  "replay_running": false
+}

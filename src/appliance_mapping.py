@@ -11,7 +11,7 @@ APPLIANCE_NAMES = {
     "Appliance2": "Lights",
     "Appliance3": "Television",
     "Appliance4": "Microwave",
-    "Appliance5": "Washing Machine",
+    "Appliance5": "Air Conditioner",
     "Appliance6": "Water Heater",
     "Appliance7": "Laptop",
     "Appliance8": "Iron",

@@ -1,0 +1,366 @@
+{
+  "scenario": "REFIT aggregate plus additional simulated appliances",
+  "forecast_horizon_minutes": 15,
+  "admission_assumption": "Current forecast held constant for job duration",
+  "complete_test_days": 68,
+  "excluded_days": [
+    {
+      "date": "2015-03-19",
+      "intervals": 84,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-03-22",
+      "intervals": 34,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-03-23",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-03-24",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-03-25",
+      "intervals": 34,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-03-29",
+      "intervals": 4,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-03-30",
+      "intervals": 87,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-03-31",
+      "intervals": 18,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-01",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-02",
+      "intervals": 30,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-03",
+      "intervals": 7,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-04",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-05",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-06",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-07",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-08",
+      "intervals": 54,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-29",
+      "intervals": 52,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-04-30",
+      "intervals": 42,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-10",
+      "intervals": 95,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-11",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-12",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-13",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-14",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-15",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-16",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-17",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-18",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-19",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-20",
+      "intervals": 35,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-24",
+      "intervals": 41,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-25",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-26",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-05-27",
+      "intervals": 47,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-10",
+      "intervals": 54,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-11",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-12",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-13",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-14",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-15",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-16",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-17",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-18",
+      "intervals": 0,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-06-19",
+      "intervals": 89,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-07-08",
+      "intervals": 9,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-07-09",
+      "intervals": 84,
+      "reason": "Incomplete day or gaps"
+    },
+    {
+      "date": "2015-07-10",
+      "intervals": 48,
+      "reason": "Incomplete day or gaps"
+    }
+  ],
+  "comparable_dates": [
+    "2015-03-20",
+    "2015-03-21",
+    "2015-03-26",
+    "2015-03-27",
+    "2015-03-28",
+    "2015-04-09",
+    "2015-04-10",
+    "2015-04-11",
+    "2015-04-12",
+    "2015-04-13",
+    "2015-04-14",
+    "2015-04-15",
+    "2015-04-16",
+    "2015-04-17",
+    "2015-04-18",
+    "2015-04-19",
+    "2015-04-20",
+    "2015-04-21",
+    "2015-04-22",
+    "2015-04-23",
+    "2015-04-24",
+    "2015-04-25",
+    "2015-04-26",
+    "2015-04-27",
+    "2015-04-28",
+    "2015-05-01",
+    "2015-05-02",
+    "2015-05-03",
+    "2015-05-04",
+    "2015-05-05",
+    "2015-05-06",
+    "2015-05-07",
+    "2015-05-08",
+    "2015-05-09",
+    "2015-05-21",
+    "2015-05-22",
+    "2015-05-23",
+    "2015-05-28",
+    "2015-05-29",
+    "2015-05-30",
+    "2015-05-31",
+    "2015-06-01",
+    "2015-06-02",
+    "2015-06-03",
+    "2015-06-04",
+    "2015-06-05",
+    "2015-06-06",
+    "2015-06-07",
+    "2015-06-08",
+    "2015-06-09",
+    "2015-06-20",
+    "2015-06-21",
+    "2015-06-22",
+    "2015-06-23",
+    "2015-06-24",
+    "2015-06-25",
+    "2015-06-26",
+    "2015-06-27",
+    "2015-06-28",
+    "2015-06-29",
+    "2015-06-30",
+    "2015-07-01",
+    "2015-07-02",
+    "2015-07-03",
+    "2015-07-04",
+    "2015-07-05",
+    "2015-07-06",
+    "2015-07-07"
+  ],
+  "negative_predictions_clipped": 0,
+  "tariffs": "Illustrative demo_units/kWh; not an actual electricity tariff",
+  "summary": [
+    {
+      "method": "unscheduled",
+      "evaluated_days": 68,
+      "comparable_days": 68,
+      "scheduled_jobs": 204,
+      "unserved_jobs": 0,
+      "unserved_energy_kwh": 0.0,
+      "job_constraint_violations": 0,
+      "actual_power_cap_violation_slots": 14,
+      "base_already_over_cap_slots": 4,
+      "new_over_cap_slots": 10,
+      "mean_served_delay_minutes": 0.0,
+      "comparable_mean_daily_peak_kw": 4.063508533051892,
+      "comparable_total_cost": 7039.61287099054,
+      "comparable_added_job_cost": 3128.0,
+      "comparable_mean_daily_peak_kw_reduction_percent": 0.0,
+      "comparable_total_cost_reduction_percent": 0.0
+    },
+    {
+      "method": "rule_based",
+      "evaluated_days": 68,
+      "comparable_days": 68,
+      "scheduled_jobs": 204,
+      "unserved_jobs": 0,
+      "unserved_energy_kwh": 0.0,
+      "job_constraint_violations": 0,
+      "actual_power_cap_violation_slots": 8,
+      "base_already_over_cap_slots": 4,
+      "new_over_cap_slots": 4,
+      "mean_served_delay_minutes": 160.0,
+      "comparable_mean_daily_peak_kw": 4.467649538593925,
+      "comparable_total_cost": 5162.81287099054,
+      "comparable_added_job_cost": 1251.1999999999998,
+      "comparable_mean_daily_peak_kw_reduction_percent": -9.945617248119895,
+      "comparable_total_cost_reduction_percent": 26.66055697088235
+    },
+    {
+      "method": "adaptive",
+      "evaluated_days": 68,
+      "comparable_days": 68,
+      "scheduled_jobs": 204,
+      "unserved_jobs": 0,
+      "unserved_energy_kwh": 0.0,
+      "job_constraint_violations": 0,
+      "actual_power_cap_violation_slots": 7,
+      "base_already_over_cap_slots": 4,
+      "new_over_cap_slots": 3,
+      "mean_served_delay_minutes": 180.0,
+      "comparable_mean_daily_peak_kw": 3.886867101210744,
+      "comparable_total_cost": 5162.81287099054,
+      "comparable_added_job_cost": 1251.2,
+      "comparable_mean_daily_peak_kw_reduction_percent": 4.347017618011052,
+      "comparable_total_cost_reduction_percent": 26.66055697088235
+    }
+  ]
+}

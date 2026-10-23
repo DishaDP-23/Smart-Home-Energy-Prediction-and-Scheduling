@@ -33,6 +33,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Existing dashboard data
 CSV_FILE = PROJECT_ROOT / "data" / "replayed_energy.csv"
 
+# Confirmed ThingsBoard publishes — original measurement timestamps
+HISTORICAL_FILE = PROJECT_ROOT / "historical_measurements.csv"
+
 # Original historical dataset used for XGBoost forecasting
 FORECAST_DATASET = PROJECT_ROOT / "house1_15min.csv"
 
@@ -40,6 +43,7 @@ FORECAST_DATASET = PROJECT_ROOT / "house1_15min.csv"
 SCHEDULING_RESULTS_DIR = PROJECT_ROOT / "rolling"
 SCHEDULING_SUMMARY_FILE = SCHEDULING_RESULTS_DIR / "summary.csv"
 SCHEDULING_REPORT_FILE = SCHEDULING_RESULTS_DIR / "report.json"
+SCHEDULES_FILE = PROJECT_ROOT / "rolling" / "schedules.json"
 
 REFRESH_SECONDS = 2
 MAX_GRAPH_READINGS = 100
@@ -515,6 +519,168 @@ def display_scheduling_evaluation():
         "where household consumption exceeds the configured power cap."
     )
 
+    
+def display_appliance_schedules():
+    """Display daily schedules for the three simulated appliances."""
+
+    st.header("Daily Appliance Schedules")
+
+    if not SCHEDULES_FILE.exists():
+        st.warning(f"Schedule file not found: {SCHEDULES_FILE}")
+        return
+
+    try:
+        with open(SCHEDULES_FILE, encoding="utf-8") as file:
+            schedules = json.load(file)
+    except (OSError, json.JSONDecodeError) as exc:
+        st.error(f"Could not load appliance schedules: {exc}")
+        return
+
+    if not isinstance(schedules, dict) or not schedules:
+        st.info("No appliance schedules are available.")
+        return
+
+    st.caption(
+        "Schedules for the simulated washing machine, dishwasher, "
+        "and dryer. Existing scheduling evaluation results are shown above."
+    )
+
+    # Inspect the available dates in the schedule file.
+    dates = sorted(schedules.keys())
+
+    selected_date = st.selectbox(
+        "Select schedule date",
+        options=dates,
+        key="appliance_schedule_date",
+    )
+
+    daily_schedules = schedules[selected_date]
+
+    if not isinstance(daily_schedules, dict) or not daily_schedules:
+        st.info("No schedules are available for this date.")
+        return
+
+    strategy_labels = {
+        "unscheduled": "Unscheduled",
+        "rule_based": "Rule-based",
+        "adaptive": "Adaptive",
+    }
+
+    available_strategies = [
+        strategy for strategy in strategy_labels
+        if strategy in daily_schedules
+    ]
+
+    if not available_strategies:
+        st.warning("No recognized scheduling strategies were found.")
+        return
+
+    selected_strategy = st.selectbox(
+        "Select scheduling strategy",
+        options=available_strategies,
+        format_func=lambda strategy: strategy_labels[strategy],
+        key="appliance_schedule_strategy",
+    )
+
+    jobs = daily_schedules[selected_strategy]
+
+    if not isinstance(jobs, list) or not jobs:
+        st.info("No appliance jobs are listed for this date and strategy.")
+        return
+
+    appliance_labels = {
+        "sim_washing_machine": "Washing Machine",
+        "sim_dishwasher": "Dishwasher",
+        "sim_dryer": "Dryer",
+    }
+
+    rows = []
+
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+
+        appliance_id = job.get("appliance_id")
+
+        if appliance_id not in appliance_labels:
+            continue
+
+        rows.append({
+            "Appliance": appliance_labels[appliance_id],
+            "Status": job.get("status", "Not specified"),
+            "Start": job.get("start", "—"),
+            "End": job.get("end", "—"),
+            "Power (kW)": job.get("power_kw"),
+            "Delay (min)": job.get("delay_minutes"),
+        })
+
+    if not rows:
+        st.info(
+            "No matching washing machine, dishwasher, or dryer "
+            "jobs were found for this strategy."
+        )
+        return
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
+def display_live_schedule(latest_power_w, forecast_kw=None):
+    """Recommend appliance start slots using current power and forecast."""
+
+    st.header("Live Appliance Scheduling")
+
+    st.caption(
+        "Recommendations use the latest replayed household reading. "
+        "These are simulated recommendations, not physical appliance control."
+    )
+
+    appliances = {
+        "Washing Machine": {"power_kw": 1.0, "duration_min": 60},
+        "Dishwasher": {"power_kw": 1.2, "duration_min": 90},
+        "Dryer": {"power_kw": 1.8, "duration_min": 60},
+    }
+
+    current_kw = float(latest_power_w) / 1000
+    planning_kw = (
+        max(current_kw, float(forecast_kw))
+        if forecast_kw is not None
+        else current_kw
+    )
+
+    # Demo planning limit; adjust to your configured household power cap.
+    max_household_kw = 3.0
+    available_kw = max(0.0, max_household_kw - planning_kw)
+
+    st.metric("Latest Household Power", f"{current_kw:.2f} kW")
+    st.metric("Estimated Spare Capacity", f"{available_kw:.2f} kW")
+
+    rows = []
+    for name, appliance in appliances.items():
+        fits = appliance["power_kw"] <= available_kw
+        rows.append({
+            "Appliance": name,
+            "Power (kW)": appliance["power_kw"],
+            "Duration (min)": appliance["duration_min"],
+            "Recommendation": (
+                "Can start now (estimated)"
+                if fits else "Defer — insufficient spare capacity"
+            ),
+        })
+
+    st.dataframe(pd.DataFrame(rows), hide_index=True,
+                 use_container_width=True)
+
+    st.caption(
+        "This is a capacity-based demo recommendation, not a full "
+        "duration-aware scheduler. The 3.0 kW limit is illustrative."
+    )
+
+
+
 def display_dashboard():
 
     st.title("⚡ Smart Home Energy Management")
@@ -603,35 +769,102 @@ def display_dashboard():
     st.subheader("Next-Interval Energy Forecast")
 
     try:
-        forecast_history = load_forecast_history()
         predictor = load_predictor()
 
-        if len(forecast_history) < 97:
+        # Use the replayed measurements already loaded by the dashboard.
+        forecast_columns = [
+            "timestamp",
+            "total_power_w",
+            *[f"Appliance{i}" for i in range(1, 10)],
+        ]
+
+        missing_columns = [
+            column for column in forecast_columns
+            if column not in data.columns
+        ]
+
+        if missing_columns:
             st.warning(
-                "At least 97 valid historical readings "
-                "are required for forecasting."
+                "Forecast unavailable. Required replay columns are "
+                f"missing: {missing_columns}"
             )
         else:
-            history_window = forecast_history.tail(97).copy()
-            forecast = predictor.predict_next(history_window)
-
-            forecast_col1, forecast_col2 = st.columns(2)
-
-            forecast_col1.metric(
-                "Predicted Aggregate Power",
-                f"{forecast['predicted_aggregate_kw'] * 1000:,.2f} W",
+            # Map replay data to the model's expected input names.
+            forecast_history = data[forecast_columns].copy()
+            forecast_history = forecast_history.rename(
+                columns={
+                    "timestamp": "Time",
+                    "total_power_w": "Aggregate",
+                }
             )
 
-            forecast_col2.metric(
-                "Forecast Timestamp",
-                forecast["timestamp"],
+            forecast_history["Time"] = pd.to_datetime(
+                forecast_history["Time"], errors="coerce"
             )
 
-            st.caption(
-                "XGBoost forecast for the next 15-minute interval, "
-                "based on recorded historical measurements. "
-                "This is not a live measurement."
+            numeric_columns = [
+                "Aggregate",
+                *[f"Appliance{i}" for i in range(1, 10)],
+            ]
+
+            for column in numeric_columns:
+                forecast_history[column] = pd.to_numeric(
+                    forecast_history[column], errors="coerce"
+                )
+
+            forecast_history = (
+                forecast_history
+                .dropna(subset=["Time", *numeric_columns])
+                .sort_values("Time")
+                .drop_duplicates(subset=["Time"], keep="last")
+                .reset_index(drop=True)
             )
+
+            # Find the latest uninterrupted 15-minute sequence.
+            if not forecast_history.empty:
+                gaps = forecast_history["Time"].diff()
+                gap_positions = gaps[
+                    gaps != pd.Timedelta(minutes=15)
+                ].index
+
+                if len(gap_positions) > 0:
+                    forecast_history = (
+                        forecast_history
+                        .iloc[gap_positions[-1]:]
+                        .reset_index(drop=True)
+                    )
+
+            available = len(forecast_history)
+
+            if available < 97:
+                st.info(
+                    "Collecting consecutive readings for forecasting: "
+                    f"{available}/97. A forecast will be available "
+                    "after 97 valid consecutive readings."
+                )
+            else:
+                history_window = forecast_history.tail(97).copy()
+                forecast = predictor.predict_next(history_window)
+
+                forecast_col1, forecast_col2 = st.columns(2)
+
+                forecast_col1.metric(
+                    "Predicted Aggregate Power",
+                    f"{forecast['predicted_aggregate_kw'] * 1000:,.2f} W",
+                )
+
+                forecast_col2.metric(
+                    "Forecast Timestamp",
+                    pd.Timestamp(forecast["timestamp"]).strftime(
+                        "%Y-%m-%d %H:%M"
+                    ),
+                )
+
+                st.caption(
+                    "XGBoost prediction for the next 15-minute interval, "
+                    "based on the latest consecutive replayed measurements. "
+                    "This is a forecast, not a measured power reading."
+                )
 
     except (FileNotFoundError, ValueError, KeyError, OSError) as exc:
         st.warning(f"Forecast unavailable: {exc}")
@@ -640,8 +873,17 @@ def display_dashboard():
         st.error(
             f"An unexpected forecasting error occurred: {exc}"
         )
+
         
+    display_live_schedule(latest_power)
+
+    st.divider()
+
     display_scheduling_evaluation()
+    st.divider()
+
+    display_appliance_schedules()
+
     st.divider()
 
     # --------------------------------------------------
@@ -916,9 +1158,78 @@ def display_dashboard():
             use_container_width=True,
         )
 
+    display_historical_measurements()
+
     st.caption(
         "Virtual sensor simulation | "
         "CSV storage + MQTT telemetry to ThingsBoard"
+    )
+
+
+# --------------------------------------------------
+# Confirmed historical measurements — ADD-ON
+# --------------------------------------------------
+
+def display_historical_measurements():
+    """Display successfully published measurements and allow CSV download."""
+
+    st.divider()
+    st.subheader("Confirmed Historical Measurements")
+
+    st.caption(
+        "Measurements whose MQTT publish was acknowledged by the client. "
+        "Timestamps represent the original recorded measurements."
+    )
+
+    if not HISTORICAL_FILE.exists():
+        st.info(
+            "No confirmed historical measurements have been recorded yet. "
+            "Start the virtual sensor to populate this file."
+        )
+        return
+
+    try:
+        historical_data = pd.read_csv(HISTORICAL_FILE)
+
+    except (
+        OSError,
+        pd.errors.EmptyDataError,
+        pd.errors.ParserError,
+    ) as exc:
+        st.warning(f"Could not load historical measurements: {exc}")
+        return
+
+    required_columns = {"timestamp", "total_power_w"}
+
+    if not required_columns.issubset(historical_data.columns):
+        st.warning(
+            "The historical CSV is missing required columns: "
+            "timestamp and/or total_power_w."
+        )
+        return
+
+    if historical_data.empty:
+        st.info("The historical measurements file is currently empty.")
+        return
+
+    # Preserve the original timestamp strings in the displayed/downloaded data.
+    st.caption(f"Total confirmed records: {len(historical_data):,}")
+
+    st.dataframe(
+        historical_data,
+        hide_index=True,
+        use_container_width=True,
+        height=350,
+    )
+
+    csv_data = historical_data.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Download Historical Measurements (CSV)",
+        data=csv_data,
+        file_name="historical_measurements.csv",
+        mime="text/csv",
+        key="download_historical_measurements",
     )
 
 

@@ -1,0 +1,10 @@
+{
+    "target": "next_15min_aggregate_power",
+    "mae": 167.74162293680172,
+    "rmse": 364.39299527134403,
+    "r2": 0.2754053744873618,
+    "mape_percent_actual_abs_gt_1": 40.27605177315341,
+    "test_samples": 7476,
+    "features": 21,
+    "best_iteration": 116
+}

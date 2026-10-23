@@ -1,0 +1,12 @@
+{
+  "source": "D:\\Projects\\ES Project\\Smart-Home-Energy-Prediction-and-Scheduling\\house1_15min.csv",
+  "sha256": "3bde079fa166a0a31297769f0115e5819d223c263b67b11651afee7b1d7e518b",
+  "rows": 53970,
+  "first_time": "2013-10-09 13:00:00",
+  "last_time": "2015-07-10 11:45:00",
+  "missing_intervals": 7370,
+  "invalid_measurements_masked": 0,
+  "negative_values": 0,
+  "units": "W",
+  "interval_minutes": 15
+}
