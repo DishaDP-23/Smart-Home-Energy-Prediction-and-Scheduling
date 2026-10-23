@@ -8,6 +8,9 @@ Replay recorded household energy measurements from house1_15min.csv.
 - Preserves the original dataset timestamps.
 """
 
+import argparse
+import sys
+import math
 import csv
 import json
 import os
@@ -17,7 +20,11 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from appliance_mapping import APPLIANCE_NAMES
+# Support both python src/virtual_sensors.py and module execution.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.appliance_mapping import APPLIANCE_NAMES
+from predictor import Predictor
+from replay_controller import ReplayController, write_state, telemetry_values
 
 try:
     import paho.mqtt.client as mqtt
@@ -34,6 +41,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_FILE = PROJECT_ROOT / "house1_15min.csv"
 DATA_DIR = PROJECT_ROOT / "data"
 OUTPUT_FILE = DATA_DIR / "replayed_energy.csv"
+STATE_FILE = DATA_DIR / "replay_state.json"
 
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -108,6 +116,12 @@ def load_recorded_data():
         raise ValueError(
             "The source dataset contains missing power readings."
         )
+
+    if not data[numeric_columns].map(math.isfinite).all().all():
+        raise ValueError("Nonfinite power readings were found")
+
+    if not (data["Time"] == data["Time"].dt.floor("15min")).all():
+        raise ValueError("Timestamps must align to 15-minute intervals")
 
     if (data[numeric_columns] < 0).any().any():
         raise ValueError(
@@ -184,7 +198,7 @@ def create_mqtt_client():
     return None
 
 
-def publish_reading(client, reading):
+def publish_reading(client, reading, state=None):
     """Publish a recorded row using its original dataset timestamp."""
 
     if client is None or not client.is_connected():
@@ -192,19 +206,23 @@ def publish_reading(client, reading):
 
     source_time = pd.Timestamp(reading["timestamp"])
 
-    # Preserve an explicit timezone if present. For timezone-naive
-    # dataset timestamps, use the computer's local timezone.
+    # Explicit configured timezone avoids machine-dependent historical timestamps.
+    if source_time.tzinfo is None:
+        source_time = source_time.tz_localize(os.getenv("REFIT_TIMEZONE", "UTC"))
     timestamp_ms = int(source_time.timestamp() * 1000)
 
-    telemetry_values = {
+    values = {
         key: float(value)
         for key, value in reading.items()
         if key != "timestamp"
     }
 
+    if state is not None:
+        values = telemetry_values(reading, state)
+
     payload = {
         "ts": timestamp_ms,
-        "values": telemetry_values,
+        "values": values,
     }
 
     try:
@@ -238,7 +256,7 @@ def publish_reading(client, reading):
 # Historical dataset replay
 # --------------------------------------------------
 
-def run_replay(interval_seconds=INTERVAL_SECONDS):
+def run_replay(interval_seconds=INTERVAL_SECONDS, limit=None, no_mqtt=False):
     """Replay the source dataset sequentially, from first row to last."""
 
     if interval_seconds <= 0:
@@ -246,10 +264,16 @@ def run_replay(interval_seconds=INTERVAL_SECONDS):
             "interval_seconds must be greater than zero."
         )
 
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be positive")
     data = load_recorded_data()
+    if limit is not None:
+        data = data.head(limit)
+    config = json.loads((PROJECT_ROOT / "config/rolling_appliances.json").read_text(encoding="utf-8"))
+    controller = ReplayController(Predictor(), config)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    client = create_mqtt_client()
+    write_state(STATE_FILE, {"status": "starting", "forecast": None, "schedule": []})
+    client = None if no_mqtt else create_mqtt_client()
 
     print(f"Source dataset: {SOURCE_FILE}")
     print(f"Replay output:  {OUTPUT_FILE}")
@@ -288,7 +312,10 @@ def run_replay(interval_seconds=INTERVAL_SECONDS):
                 save_reading(reading, writer)
                 output_file.flush()
 
-                publish_reading(client, reading)
+                state = controller.observe(row.to_dict())
+                state["replay_running"] = True
+                write_state(STATE_FILE, state)
+                publish_reading(client, reading, state)
 
                 print(
                     f"[{index + 1}/{len(data)}] "
@@ -306,6 +333,9 @@ def run_replay(interval_seconds=INTERVAL_SECONDS):
         print("\nDataset replay stopped by user.")
 
     finally:
+        if "state" in locals():
+            state["replay_running"] = False
+            write_state(STATE_FILE, state)
         if client is not None:
             try:
                 if client.is_connected():
@@ -316,4 +346,9 @@ def run_replay(interval_seconds=INTERVAL_SECONDS):
 
 
 if __name__ == "__main__":
-    run_replay()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--interval", type=float, default=INTERVAL_SECONDS)
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--no-mqtt", action="store_true")
+    args = parser.parse_args()
+    run_replay(args.interval, args.limit, args.no_mqtt)

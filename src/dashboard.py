@@ -22,7 +22,8 @@ import pandas as pd
 import streamlit as st
 import json
 
-from predictor import Predictor
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.appliance_mapping import get_appliance_name
 # --------------------------------------------------
 # Project configuration
@@ -37,7 +38,8 @@ CSV_FILE = PROJECT_ROOT / "data" / "replayed_energy.csv"
 FORECAST_DATASET = PROJECT_ROOT / "house1_15min.csv"
 
 # Existing rolling-scheduler evaluation results
-SCHEDULING_RESULTS_DIR = PROJECT_ROOT / "rolling"
+SCHEDULING_RESULTS_DIR = PROJECT_ROOT / "results" / "rolling"
+STATE_FILE = PROJECT_ROOT / "data" / "replay_state.json"
 SCHEDULING_SUMMARY_FILE = SCHEDULING_RESULTS_DIR / "summary.csv"
 SCHEDULING_REPORT_FILE = SCHEDULING_RESULTS_DIR / "report.json"
 
@@ -135,64 +137,11 @@ def load_sensor_data():
 
 
 
-@st.cache_resource
-def load_predictor():
-    """Load the trained XGBoost model once."""
-    return Predictor()
-
-
-@st.cache_data
-def load_forecast_history():
-    """Load and prepare the original recorded dataset."""
-    if not FORECAST_DATASET.exists():
-        raise FileNotFoundError(
-            f"Forecast dataset not found: {FORECAST_DATASET}"
-        )
-
-    history = pd.read_csv(FORECAST_DATASET)
-
-    required_columns = [
-        "Time",
-        "Aggregate",
-        *[f"Appliance{i}" for i in range(1, 10)],
-    ]
-
-    missing = [
-        column for column in required_columns
-        if column not in history.columns
-    ]
-
-    if missing:
-        raise ValueError(
-            f"Missing forecast dataset columns: {missing}"
-        )
-
-    history = history[required_columns].copy()
-    history["Time"] = pd.to_datetime(
-        history["Time"], errors="coerce"
-    )
-
-    for column in required_columns[1:]:
-        history[column] = pd.to_numeric(
-            history[column], errors="coerce"
-        )
-
-    history = (
-    history.dropna(subset=required_columns)
-    .sort_values("Time")
-    .drop_duplicates(subset=["Time"], keep="last")
-    .reset_index(drop=True)
-    )
-
-    # Keep only the latest uninterrupted 15-minute sequence.
-    if not history.empty:
-        time_gaps = history["Time"].diff()
-        gap_positions = time_gaps[time_gaps != pd.Timedelta(minutes=15)].index
-
-        if len(gap_positions) > 0:
-            history = history.iloc[gap_positions[-1]:].reset_index(drop=True)
-
-    return history
+def load_replay_state():
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 # --------------------------------------------------
 # Historical time-range filtering
@@ -210,7 +159,7 @@ def filter_data_by_time_range(data, selected_range):
     cutoff = latest_timestamp - duration
 
     return (
-        data.loc[data["timestamp"] >= cutoff]
+        data.loc[data["timestamp"] > cutoff]
         .copy()
         .reset_index(drop=True)
     )
@@ -221,42 +170,11 @@ def filter_data_by_time_range(data, selected_range):
 # --------------------------------------------------
 
 def calculate_energy_kwh(data, power_column):
-    """
-    Estimate energy using the trapezoidal rule.
-
-    Only intervals greater than zero and no longer than
-    MAX_ENERGY_GAP_SECONDS are included. This avoids counting
-    long periods when the simulator was stopped.
-    """
-
-    if data is None or len(data) < 2:
+    """Each recorded value is a completed 15-minute interval average in W."""
+    if data is None or data.empty:
         return 0.0
-
-    elapsed_seconds = (
-        data["timestamp"].diff().dt.total_seconds()
-    )
-
-    power = pd.to_numeric(
-        data[power_column], errors="coerce"
-    )
-
-    average_power = (
-        power + power.shift(1)
-    ) / 2
-
-    valid_intervals = (
-        elapsed_seconds.gt(0)
-        & elapsed_seconds.le(MAX_ENERGY_GAP_SECONDS)
-        & average_power.notna()
-    )
-
-    energy_wh = (
-        average_power[valid_intervals]
-        * elapsed_seconds[valid_intervals]
-        / 3600
-    ).sum()
-
-    return float(energy_wh / 1000)
+    values = pd.to_numeric(data[power_column], errors="coerce")
+    return float(values.where(values >= 0).sum() * 0.25 / 1000)
 
 
 def estimate_energy_kwh(data):
@@ -602,45 +520,34 @@ def display_dashboard():
 
     st.subheader("Next-Interval Energy Forecast")
 
-    try:
-        forecast_history = load_forecast_history()
-        predictor = load_predictor()
-
-        if len(forecast_history) < 97:
-            st.warning(
-                "At least 97 valid historical readings "
-                "are required for forecasting."
-            )
+    state = load_replay_state()
+    if not state or state.get("status") == "starting":
+        st.info("Waiting for the integrated sensor replay to publish a snapshot.")
+    else:
+        st.caption(f"Integration snapshot follows completed interval: {state['observed_timestamp']}")
+        if not state.get("replay_running", False):
+            st.info("Replay is stopped. Displaying its final saved snapshot.")
+        forecast = state.get("forecast")
+        if forecast:
+            col1, col2 = st.columns(2)
+            col1.metric("Predicted Aggregate Power", f"{forecast['predicted_aggregate_kw'] * 1000:,.2f} W")
+            col2.metric("Forecast Timestamp", forecast["timestamp"])
         else:
-            history_window = forecast_history.tail(97).copy()
-            forecast = predictor.predict_next(history_window)
+            st.info(f"Forecast warmup: {state.get('history_intervals', 0)}/97 consecutive completed intervals.")
+        st.subheader("Rolling Scheduling During Replay")
+        st.caption("Additional simulated appliance jobs; recorded appliance channels are not shifted.")
+        st.write(f"Integration status: {state['status']}")
+        c1, c2 = st.columns(2)
+        c1.metric("Simulated Appliance Power", f"{state['current_simulated_appliance_kw']:.3f} kW")
+        c2.metric("Recorded + Simulated Power", f"{state['current_total_kw']:.3f} kW")
+        if state.get("schedule"):
+            st.dataframe(pd.DataFrame(state["schedule"]), hide_index=True, use_container_width=True)
+        else:
+            st.info("No jobs started or rejected in the current scheduling horizon yet.")
+        if state.get("replay_events"):
+            with st.expander("Replay gaps / scheduling interruptions"):
+                st.dataframe(pd.DataFrame(state["replay_events"]), hide_index=True)
 
-            forecast_col1, forecast_col2 = st.columns(2)
-
-            forecast_col1.metric(
-                "Predicted Aggregate Power",
-                f"{forecast['predicted_aggregate_kw'] * 1000:,.2f} W",
-            )
-
-            forecast_col2.metric(
-                "Forecast Timestamp",
-                forecast["timestamp"],
-            )
-
-            st.caption(
-                "XGBoost forecast for the next 15-minute interval, "
-                "based on recorded historical measurements. "
-                "This is not a live measurement."
-            )
-
-    except (FileNotFoundError, ValueError, KeyError, OSError) as exc:
-        st.warning(f"Forecast unavailable: {exc}")
-
-    except Exception as exc:
-        st.error(
-            f"An unexpected forecasting error occurred: {exc}"
-        )
-        
     display_scheduling_evaluation()
     st.divider()
 
@@ -743,10 +650,8 @@ def display_dashboard():
 
     st.caption(
         f"Estimated tariff: ₹{ELECTRICITY_TARIFF:.2f}/kWh. "
-        "Energy and cost are calculated from valid "
-        "consecutive readings; intervals longer than "
-        f"{MAX_ENERGY_GAP_SECONDS} seconds are excluded. "
-        "Results represent simulated data."
+        "Energy sums completed 15-minute interval-average readings. "
+        "Missing intervals contribute no estimate. Tariff is illustrative; readings are historical."
     )
 
     st.divider()
@@ -788,9 +693,8 @@ def display_dashboard():
     # Always displays the latest sensor reading.
     # --------------------------------------------------
 
-    st.subheader(
-        "Current Appliance Readings"
-    )
+    st.subheader("Current Appliance Readings")
+    st.caption("Appliance labels are illustrative assumptions; channel identities have not been verified.")
 
     appliance_data = pd.DataFrame({
         "Appliance": [
@@ -836,10 +740,8 @@ def display_dashboard():
     )
 
     st.caption(
-        "Contribution is calculated from each "
-        "appliance's estimated energy over valid "
-        "intervals in the selected period, not just "
-        "its latest power reading."
+        "Contribution uses recorded 15-minute interval energy. Friendly appliance names "
+        "are illustrative, unverified labels, not confirmed REFIT channel identities."
     )
 
     if not appliance_analytics.empty:

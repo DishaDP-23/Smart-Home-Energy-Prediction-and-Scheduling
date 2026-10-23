@@ -1,5 +1,30 @@
 # Smart Home Energy Prediction and Scheduling
 
+## Integrated replay and dashboard
+
+Install the updated `requirements.txt` in the project environment. The trained model must be at `models/xgboost_energy_model.joblib`, and the source file at `house1_15min.csv`.
+
+Run these commands from the repository root in two separate PowerShell terminals:
+
+```powershell
+.\.venv\Scripts\python.exe src/virtual_sensors.py --no-mqtt
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run src/dashboard.py
+```
+
+Open the local URL printed by Streamlit. Omit `--no-mqtt` to publish when `THINGSBOARD_TOKEN` and optionally `THINGSBOARD_HOST` are configured in a private `.env`. Historical telemetry uses `REFIT_TIMEZONE` (default UTC) for naive timestamps; confirm the original dataset timezone before claiming absolute-time accuracy. A historical ThingsBoard chart must cover the replay's source dates, not only today's dates.
+
+The sensor process now owns forecasting and dispatch. Each completed interval updates a rolling buffer of 97 readings. Its forecast targets the following interval; one persistent scheduler instance handles that day's additional simulated jobs. The dashboard reads the same atomic `data/replay_state.json` snapshot rather than independently forecasting from the end of the dataset. It displays warmup, dispatch decisions, simulated appliance power, and recorded-plus-simulated power. Recorded readings and simulated loads stay separate, and simulated loads never feed back into the model.
+
+Gaps reset the history and interrupt scheduling explicitly in the replay events. Scheduling resumes on a later day after 97 consecutive readings are available. Jobs are not silently carried over missing observations. This online demonstration is distinct from the offline evaluation restricted to complete held-out days: the default replay includes the full source chronology, including training dates, and is not an independent accuracy benchmark. Simulated totals for the last completed interval and decisions for the next interval are separately timestamped.
+
+MQTT includes recorded values, simulated totals, forecast target/value and JSON-encoded schedule decisions. Network delivery still requires a successful connection to the user's device. Use `--limit 300 --interval 0.02 --no-mqtt` for a bounded local smoke test. The dashboard's offline performance section reads `results/rolling/`; run `run_refit.ps1` if these saved reports are absent. Household energy analytics sum interval-average power times 0.25 hours, and their flat illustrative INR tariff is separate from offline scheduling's time-of-use demo tariff.
+
+Friendly sensor appliance labels remain unverified assumptions and are labelled as such on the dashboard. These recorded channels are not the additional simulated jobs.
+
+
 Person 1's REFIT/XGBoost pipeline is integrated with Person 2's **rolling 15-minute scheduler**. The earlier synthetic day-ahead demo remains a separate example.
 
 ## What this experiment means

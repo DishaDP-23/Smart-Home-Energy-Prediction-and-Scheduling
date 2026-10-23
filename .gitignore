@@ -25,3 +25,6 @@ results/schedules.json
 results/load_profiles.csv
 results/demand_comparison.png
 results/metrics_comparison.png
+data/replayed_energy.csv
+data/replay_state.json
+data/replay_state.tmp
